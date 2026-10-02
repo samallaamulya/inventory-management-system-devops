@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inventory Management System</title>
+<style>
+  :root { --bg:#f4f6fb; --card:#fff; --ink:#1f2937; --muted:#6b7280; --brand:#2563eb; --bad:#dc2626; --ok:#16a34a; --line:#e5e7eb; }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:var(--bg); color:var(--ink); }
+  header { background:var(--brand); color:#fff; padding:16px 24px; font-size:20px; font-weight:600; }
+  main { max-width:1100px; margin:24px auto; padding:0 16px; }
+  .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px; margin-bottom:20px; }
+  .stat { background:var(--card); border-radius:10px; padding:16px; border:1px solid var(--line); }
+  .stat small { color:var(--muted); display:block; }
+  .stat b { font-size:24px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:20px; }
+  form { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  input { padding:9px; border:1px solid var(--line); border-radius:6px; font-size:14px; width:100%; }
+  button { padding:9px 14px; border:0; border-radius:6px; background:var(--brand); color:#fff; cursor:pointer; font-size:14px; }
+  button.sm { padding:5px 9px; font-size:12px; }
+  button.red { background:var(--bad); } button.grey { background:#6b7280; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:10px 8px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; }
+  .low { color:var(--bad); font-weight:600; }
+  .toolbar { display:flex; justify-content:space-between; gap:10px; margin-bottom:12px; }
+  .toolbar input { max-width:320px; }
+  #msg { margin-bottom:12px; font-size:14px; min-height:18px; }
+  .scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<header>📦 Inventory Management System</header>
+<main>
+  <div class="stats">
+    <div class="stat"><small>Products</small><b id="s-products">0</b></div>
+    <div class="stat"><small>Total units</small><b id="s-units">0</b></div>
+    <div class="stat"><small>Stock value</small><b id="s-value">0</b></div>
+    <div class="stat"><small>Low stock items</small><b id="s-low" class="low">0</b></div>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">Add product</h3>
+    <div id="msg"></div>
+    <form id="add-form">
+      <input name="sku" placeholder="SKU *" required>
+      <input name="name" placeholder="Name *" required>
+      <input name="category" placeholder="Category">
+      <input name="quantity" type="number" min="0" placeholder="Quantity" value="0">
+      <input name="price" type="number" min="0" step="0.01" placeholder="Price" value="0">
+      <input name="reorder_level" type="number" min="0" placeholder="Reorder level" value="5">
+      <button type="submit">Add</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <div class="toolbar">
+      <h3 style="margin:0">Products</h3>
+      <input id="search" placeholder="Search name, SKU or category…">
+    </div>
+    <div class="scroll">
+    <table>
+      <thead><tr><th>SKU</th><th>Name</th><th>Category</th><th>Qty</th><th>Price</th><th>Reorder at</th><th>Actions</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    </div>
+  </div>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (t) => String(t).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+function flash(text, ok = true) {
+  const m = $('#msg'); m.textContent = text; m.style.color = ok ? 'var(--ok)' : 'var(--bad)';
+  setTimeout(() => m.textContent = '', 3500);
+}
+
+async function api(url, method = 'GET', body) {
+  const res = await fetch(url, { method, headers: {'Content-Type':'application/json'}, body: body ? JSON.stringify(body) : undefined });
+  if (res.status === 204) return null;
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Request failed');
+  return data;
+}
+
+async function loadStats() {
+  const s = await api('/api/stats');
+  $('#s-products').textContent = s.total_products;
+  $('#s-units').textContent = s.total_units;
+  $('#s-value').textContent = s.total_value.toLocaleString(undefined, {minimumFractionDigits:2});
+  $('#s-low').textContent = s.low_stock_count;
+}
+
+async function loadProducts() {
+  const q = $('#search').value.trim();
+  const items = await api('/api/products' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  $('#rows').innerHTML = items.length ? items.map(p => `
+    <tr>
+      <td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${esc(p.category)}</td>
+      <td class="${p.quantity <= p.reorder_level ? 'low' : ''}">${p.quantity}</td>
+      <td>${p.price.toFixed(2)}</td><td>${p.reorder_level}</td>
+      <td>
+        <button class="sm" onclick="adjust(${p.id}, 1)">+1</button>
+        <button class="sm grey" onclick="adjust(${p.id}, -1)">−1</button>
+        <button class="sm" onclick="edit(${p.id})">Edit</button>
+        <button class="sm red" onclick="removeItem(${p.id})">Delete</button>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="7">No products yet.</td></tr>';
+}
+
+const refresh = () => Promise.all([loadProducts(), loadStats()]);
+
+async function adjust(id, change) {
+  try { await api(`/api/products/${id}/adjust`, 'POST', { change }); refresh(); }
+  catch (e) { flash(e.message, false); }
+}
+
+async function edit(id) {
+  const p = await api('/api/products/' + id);
+  const name = prompt('Name', p.name); if (name === null) return;
+  const price = prompt('Price', p.price); if (price === null) return;
+  const level = prompt('Reorder level', p.reorder_level); if (level === null) return;
+  try { await api('/api/products/' + id, 'PUT', { name, price, reorder_level: level }); flash('Updated'); refresh(); }
+  catch (e) { flash(e.message, false); }
+}
+
+async function removeItem(id) {
+  if (!confirm('Delete this product?')) return;
+  try { await api('/api/products/' + id, 'DELETE'); flash('Deleted'); refresh(); }
+  catch (e) { flash(e.message, false); }
+}
+
+$('#add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = Object.fromEntries(new FormData(e.target).entries());
+  try { await api('/api/products', 'POST', body); e.target.reset(); flash('Product added'); refresh(); }
+  catch (err) { flash(err.message, false); }
+});
+
+$('#search').addEventListener('input', loadProducts);
+refresh();
+</script>
+</body>
+</html>

@@ -1,0 +1,11 @@
+services:
+  inventory:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - inventory-data:/data
+    restart: unless-stopped
+
+volumes:
+  inventory-data:
